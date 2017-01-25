@@ -5,10 +5,11 @@ namespace Sitecore.Support.ContentSearch.Maintenance.Strategies
     using System.Linq;
     using System.Runtime.Serialization;
     using Configuration;
-    using Data.Archiving;
-    using Data.Eventing.Remote;
+    using Data.Eventing;
     using Eventing;
     using Sitecore.ContentSearch.Diagnostics;
+    using Sitecore.Data.Archiving;
+    using Sitecore.Data.Eventing.Remote;
 
     [DataContract]
     public class OnPublishEndAsynchronousStrategy :
@@ -28,7 +29,7 @@ namespace Sitecore.Support.ContentSearch.Maintenance.Strategies
                 FromTimestamp = lastUpdatedTimestamp
             };
 
-            var lastEventQueueStamp = GetLastProcessedEventTimestamp(eventQueue);
+            var lastEventQueueStamp = this.GetLastProcessedEventTimestamp(eventQueue);
             query.ToTimestamp = lastEventQueueStamp;
 
             query.EventTypes.Add(typeof(RemovedVersionRemoteEvent));
@@ -39,29 +40,18 @@ namespace Sitecore.Support.ContentSearch.Maintenance.Strategies
             query.EventTypes.Add(typeof(CopiedItemRemoteEvent));
             query.EventTypes.Add(typeof(RestoreItemCompletedEvent));
             list.AddRange(eventQueue.GetQueuedEvents(query));
-            return (from e in list
-                where e.Timestamp > lastUpdatedTimestamp
-                select e).ToList();
+
+            var eventRecords = list.Where(e => e.Timestamp > lastUpdatedTimestamp).ToList();
+
+            CrawlingLog.Log.Info(string.Format("SUPPORT [Index={0}] OnPublishEndAsynchronousStrategy: Processing queue [{1}; {2}] Count: {3}", this.Index.Name, lastUpdatedTimestamp, lastEventQueueStamp, eventRecords.Count));
+
+            return eventRecords;
         }
 
         protected virtual long? GetLastProcessedEventTimestamp(EventQueue eventQueue)
         {
-            var lastProcessedStamp = Database.Properties["EQStamp_" + Settings.InstanceName];
-
-            if (string.IsNullOrEmpty(lastProcessedStamp))
-            {
-                return null;
-            }
-
-            long num;
-            if (long.TryParse(lastProcessedStamp, out num))
-            {
-                return num;
-            }
-
-            CrawlingLog.Log.Warn($"SUPPORT Can't parse the stamp '{lastProcessedStamp}'");
-
-            return null;
+            var eqEx = eventQueue as SqlServerEventQueue;
+            return eqEx?.GetLastProcessedStamp;
         }
     }
 }
